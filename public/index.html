@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ETF Pulse</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='8' fill='%232a78d6'/><path d='M6 21l6-6 5 4 9-9' stroke='white' stroke-width='3' fill='none' stroke-linecap='round' stroke-linejoin='round'/></svg>">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <svg class="logo" viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8"/><path d="M6 21l6-6 5 4 9-9"/></svg>
+      <div>
+        <h1>ETF Pulse</h1>
+        <p class="sub">Live performance, scored against benchmarks</p>
+      </div>
+    </div>
+    <div class="status">
+      <span id="source-pill" class="pill" title="">Loading…</span>
+      <span id="updated" class="muted"></span>
+      <button id="refresh" class="icon-btn" aria-label="Refresh now" title="Refresh now">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 12a8 8 0 1 1-2.34-5.66M20 4v5h-5"/></svg>
+      </button>
+      <button id="theme" class="icon-btn" aria-label="Toggle dark mode" title="Toggle theme">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg>
+      </button>
+    </div>
+  </header>
+
+  <main>
+    <section class="controls" aria-label="Filters">
+      <div class="segmented" id="ranges" role="radiogroup" aria-label="Look-back window"></div>
+      <label class="sort">Sort
+        <select id="sort">
+          <option value="score">Score</option>
+          <option value="return">Return</option>
+          <option value="excess">Excess vs benchmark</option>
+          <option value="day">Today’s move</option>
+          <option value="symbol">Ticker</option>
+        </select>
+      </label>
+      <form id="add-form" class="add" autocomplete="off">
+        <input id="add-symbol" placeholder="Add ticker" aria-label="ETF ticker" maxlength="12" required>
+        <input id="add-bench" placeholder="vs SPY" aria-label="Benchmark ticker" maxlength="12">
+        <button type="submit">Add</button>
+      </form>
+    </section>
+
+    <section class="summary" id="summary" aria-label="Summary"></section>
+    <div id="errors" class="errors" hidden></div>
+    <section class="grid" id="grid" aria-label="ETFs" aria-busy="true"></section>
+
+    <section class="table-wrap">
+      <div class="section-head">
+        <h2>Comparison</h2>
+        <p class="muted">All metrics over the selected window. Returns are total returns (dividends reinvested).</p>
+      </div>
+      <div class="scroll-x"><table id="table" class="data"></table></div>
+    </section>
+
+    <section class="method">
+      <h2>How the score works</h2>
+      <p>Each ETF is tested against <strong>its category benchmark</strong> and the <strong>risk-free rate</strong> (13-week T-bill yield). Every test scores +1, 0 or −1, is weighted, and the weighted mean is mapped onto 0–100.
+        <strong>65+</strong> is Favorable, <strong>35 or below</strong> is Unfavorable, anything between is Neutral.</p>
+      <ul id="method-list"></ul>
+      <p class="muted small">This is an analytical tool, not investment advice. Past performance does not predict future returns.</p>
+    </section>
+  </main>
+
+  <div id="tooltip" class="tooltip" role="tooltip" hidden></div>
+
+  <dialog id="detail" aria-labelledby="detail-title">
+    <div class="detail-inner" id="detail-body"></div>
+  </dialog>
+
+  <script type="module" src="app.js"></script>
+</body>
+</html>
