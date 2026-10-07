@@ -21,14 +21,48 @@ function cached(key, ttl, load) {
   return promise;
 }
 
+// Yahoo throttles bursts, so keep a few requests in flight and retry
+// rate-limit / server errors with backoff, alternating between its two hosts.
+const MAX_CONCURRENT = 4;
+let active = 0;
+const waiting = [];
+async function throttled(fn) {
+  if (active >= MAX_CONCURRENT) await new Promise((resolve) => waiting.push(resolve));
+  active++;
+  try {
+    return await fn();
+  } finally {
+    active--;
+    waiting.shift()?.();
+  }
+}
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
 async function yahooChart(symbol, params) {
-  const url = `${YAHOO}${encodeURIComponent(symbol)}?${new URLSearchParams(params)}`;
-  const res = await fetch(url, { headers: HEADERS, signal: AbortSignal.timeout(10_000) });
-  if (!res.ok) throw new Error(`Yahoo ${symbol}: HTTP ${res.status}`);
-  const body = await res.json();
-  const result = body?.chart?.result?.[0];
-  if (!result) throw new Error(`Yahoo ${symbol}: ${body?.chart?.error?.description || 'empty response'}`);
-  return result;
+  const query = `${encodeURIComponent(symbol)}?${new URLSearchParams(params)}`;
+  let lastError;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    if (attempt) await sleep(500 * 2 ** attempt);
+    const host = attempt % 2 ? YAHOO.replace('query1', 'query2') : YAHOO;
+    try {
+      const res = await throttled(() => fetch(host + query, { headers: HEADERS, signal: AbortSignal.timeout(10_000) }));
+      if (!res.ok) {
+        lastError = new Error(`Yahoo ${symbol}: HTTP ${res.status}`);
+        if (res.status === 429 || res.status >= 500) continue;
+        throw lastError;
+      }
+      const body = await res.json();
+      const result = body?.chart?.result?.[0];
+      if (!result) throw new Error(`Yahoo ${symbol}: ${body?.chart?.error?.description || 'empty response'}`);
+      return result;
+    } catch (err) {
+      if (err === lastError) throw err;
+      lastError = err;
+      if (!/timeout|fetch failed|network/i.test(err.message)) throw err;
+    }
+  }
+  throw lastError;
 }
 
 const toDate = (ts, offset = 0) => new Date((ts + offset) * 1000).toISOString().slice(0, 10);
@@ -133,7 +167,13 @@ function marketFactor() {
   return demoMarket;
 }
 
+const demoCache = new Map();
 function demoHistory(symbol) {
+  if (!demoCache.has(symbol)) demoCache.set(symbol, makeDemoHistory(symbol));
+  return demoCache.get(symbol);
+}
+
+function makeDemoHistory(symbol) {
   const dates = businessDays(DEMO_DAYS);
   if (symbol === '^IRX') {
     const rand = mulberry32(hashString(symbol));

@@ -2,7 +2,7 @@ import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
 import { extname, join, normalize } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { buildDashboard } from './src/analysis.js';
+import { buildDashboard, buildEtfDetail } from './src/analysis.js';
 import { DATA_SOURCE, DEFAULT_RANGE, PORT, RANGES } from './src/config.js';
 
 const PUBLIC = join(fileURLToPath(new URL('.', import.meta.url)), 'public');
@@ -35,6 +35,16 @@ async function handleApi(url, res) {
   sendJson(res, 200, payload);
 }
 
+// /api/etf/QQQ?benchmark=SPY — deep-dive data for one ETF.
+async function handleDetail(url, res) {
+  const symbol = decodeURIComponent(url.pathname.slice('/api/etf/'.length)).toUpperCase();
+  const benchmark = url.searchParams.get('benchmark')?.toUpperCase();
+  if (!SYMBOL_RE.test(symbol) || (benchmark && !SYMBOL_RE.test(benchmark))) {
+    return sendJson(res, 400, { error: 'Invalid symbol' });
+  }
+  sendJson(res, 200, await buildEtfDetail({ symbol, benchmark }));
+}
+
 async function serveStatic(pathname, res) {
   const rel = normalize(pathname === '/' ? '/index.html' : pathname).replace(/^(\.\.[/\\])+/, '');
   const file = join(PUBLIC, rel);
@@ -52,6 +62,7 @@ const server = createServer(async (req, res) => {
   const url = new URL(req.url, 'http://localhost');
   try {
     if (url.pathname === '/api/dashboard') return await handleApi(url, res);
+    if (url.pathname.startsWith('/api/etf/')) return await handleDetail(url, res);
     return await serveStatic(url.pathname, res);
   } catch (err) {
     console.error(err);
