@@ -30,6 +30,7 @@
 
   <main>
     <section class="controls" aria-label="Filters">
+      <a id="back" class="back" href="#/" hidden>← All ETFs</a>
       <div class="segmented" id="ranges" role="radiogroup" aria-label="Look-back window"></div>
       <label class="sort">Sort
         <select id="sort">
@@ -40,13 +41,14 @@
           <option value="symbol">Ticker</option>
         </select>
       </label>
-      <form id="add-form" class="add" autocomplete="off">
+      <form id="add-form" class="add" autocomplete="off" title="">
         <input id="add-symbol" placeholder="Add ticker" aria-label="ETF ticker" maxlength="12" required>
         <input id="add-bench" placeholder="vs SPY" aria-label="Benchmark ticker" maxlength="12">
         <button type="submit">Add</button>
       </form>
     </section>
 
+    <div id="view-dashboard">
     <section class="summary" id="summary" aria-label="Summary"></section>
     <div id="errors" class="errors" hidden></div>
     <section class="grid" id="grid" aria-label="ETFs" aria-busy="true"></section>
@@ -66,13 +68,12 @@
       <ul id="method-list"></ul>
       <p class="muted small">This is an analytical tool, not investment advice. Past performance does not predict future returns.</p>
     </section>
+    </div>
+
+    <div id="view-etf" hidden></div>
   </main>
 
   <div id="tooltip" class="tooltip" role="tooltip" hidden></div>
-
-  <dialog id="detail" aria-labelledby="detail-title">
-    <div class="detail-inner" id="detail-body"></div>
-  </dialog>
 
   <script type="module" src="app.js"></script>
 </body>

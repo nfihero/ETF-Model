@@ -5,7 +5,7 @@ import { buildSignals, compositeScore } from './scoring.js';
 
 // Index of the first point inside the window (the bar before the window is
 // kept as the base so a 1M return spans 21 daily moves).
-function windowStart(dates, range) {
+export function windowStart(dates, range) {
   const spec = RANGES[range];
   if (spec === 'ytd') {
     const jan1 = `${dates[dates.length - 1].slice(0, 4)}-01-01`;
@@ -143,5 +143,157 @@ export async function buildDashboard({ range, extra = [] }) {
     riskFree: { symbol: RISK_FREE_SYMBOL, rate: rf.points.at(-1).close / 100, source: rf.source },
     etfs: results,
     errors,
+  };
+}
+
+// ------------------------------------------------------------------ ETF detail
+
+// Benchmarks every ETF is also scored against, besides its own.
+export const ALT_BENCHMARKS = [
+  { symbol: 'SPY', label: 'US stock market (S&P 500)' },
+  { symbol: 'VT', label: 'Global stock market' },
+  { symbol: 'AGG', label: 'US bond market' },
+  { symbol: 'BIL', label: 'Cash (T-bills)' },
+];
+const HISTORY_POINTS = 1261; // ~5 years of daily bars for the price chart
+
+function lookupEtf(symbol, benchmark) {
+  const known = ETFS.find((e) => e.symbol === symbol);
+  const etf = known ? { ...known } : { symbol, name: symbol, category: 'Custom', benchmark: 'SPY' };
+  if (benchmark) etf.benchmark = benchmark;
+  return etf;
+}
+
+function smaSeries(values, n) {
+  const out = new Array(values.length).fill(null);
+  let sum = 0;
+  for (let i = 0; i < values.length; i++) {
+    sum += values[i];
+    if (i >= n) sum -= values[i - n];
+    if (i >= n - 1) out[i] = sum / n;
+  }
+  return out;
+}
+
+function trailingReturns(dates, p, b) {
+  return Object.entries(RANGES).map(([range, spec]) => {
+    const enough = spec === 'ytd' || dates.length - 1 >= spec;
+    if (!enough) return { range, etf: null, bench: null, excess: null, annualized: false };
+    const i = windowStart(dates, range);
+    const annualize = typeof spec === 'number' && spec > 252;
+    const ret = (xs) => (annualize ? M.annualizedReturn(xs.slice(i)) : M.totalReturn(xs.slice(i)));
+    const etf = ret(p);
+    const bench = ret(b);
+    return { range, etf: finite(etf), bench: finite(bench), excess: finite(etf - bench), annualized: annualize };
+  });
+}
+
+// Year-end to year-end returns; the current year is year-to-date.
+function calendarYears(dates, p, b, years = 6) {
+  const lastIdx = new Map();
+  dates.forEach((d, i) => lastIdx.set(d.slice(0, 4), i));
+  const ys = [...lastIdx.keys()];
+  const out = [];
+  for (let k = 1; k < ys.length; k++) {
+    const from = lastIdx.get(ys[k - 1]);
+    const to = lastIdx.get(ys[k]);
+    out.push({
+      year: ys[k],
+      ytd: k === ys.length - 1,
+      etf: finite(p[to] / p[from] - 1),
+      bench: finite(b[to] / b[from] - 1),
+    });
+  }
+  return out.slice(-years);
+}
+
+function monthlyReturns(points, years = 5) {
+  const monthEnd = new Map(); // "YYYY-MM" -> close
+  for (const pt of points) monthEnd.set(pt.date.slice(0, 7), pt.close);
+  const keys = [...monthEnd.keys()];
+  const byYear = new Map();
+  for (let k = 1; k < keys.length; k++) {
+    const [y, m] = keys[k].split('-');
+    if (!byYear.has(y)) byYear.set(y, new Array(12).fill(null));
+    byYear.get(y)[Number(m) - 1] = finite(monthEnd.get(keys[k]) / monthEnd.get(keys[k - 1]) - 1);
+  }
+  return [...byYear.entries()].slice(-years).reverse().map(([year, months]) => {
+    const total = months.reduce((acc, r) => (r == null ? acc : acc * (1 + r)), 1) - 1;
+    return { year, months, total: finite(total) };
+  });
+}
+
+function rollingExcess(dates, p, b, n = 63) {
+  const start = Math.max(n, dates.length - HISTORY_POINTS);
+  const outDates = [];
+  const values = [];
+  for (let i = start; i < dates.length; i++) {
+    outDates.push(dates[i]);
+    values.push(Math.round(((p[i] / p[i - n]) - (b[i] / b[i - n])) * 1e4) / 1e4);
+  }
+  return { window: n, dates: outDates, values };
+}
+
+export async function buildEtfDetail({ symbol, benchmark }) {
+  const etf = lookupEtf(symbol, benchmark);
+  const alts = [{ symbol: etf.benchmark, label: `Category benchmark` }, ...ALT_BENCHMARKS]
+    .filter((a, i, all) => a.symbol !== etf.symbol && all.findIndex((x) => x.symbol === a.symbol) === i);
+  const symbols = [...new Set([etf.symbol, RISK_FREE_SYMBOL, ...alts.map((a) => a.symbol)])];
+  const data = Object.fromEntries(await Promise.all(symbols.map(async (s) => [s, await getSeries(s)])));
+  const own = data[etf.symbol];
+  const bench = data[etf.benchmark];
+  const rf = data[RISK_FREE_SYMBOL];
+
+  const pts = own.points;
+  const raw = pts.map((x) => x.raw);
+  const sma50 = smaSeries(raw, 50);
+  const sma200 = smaSeries(raw, 200);
+  const from = Math.max(0, pts.length - HISTORY_POINTS);
+  const r2 = (x) => (x == null ? null : Math.round(x * 100) / 100);
+
+  const { dates, left, right } = M.alignSeries(pts, bench.points);
+
+  const scorecards = {};
+  for (const range of Object.keys(RANGES)) {
+    scorecards[range] = alts.map((alt) => {
+      try {
+        const a = analyze({ ...etf, benchmark: alt.symbol }, own, data[alt.symbol], rf, range);
+        return {
+          symbol: alt.symbol,
+          label: alt.label,
+          isPrimary: alt.symbol === etf.benchmark,
+          benchReturn: a.metrics.benchmark.totalReturn,
+          excessReturn: a.metrics.excessReturn,
+          beta: a.metrics.beta,
+          correlation: a.metrics.correlation,
+          alpha: a.metrics.alpha,
+          informationRatio: a.metrics.informationRatio,
+          composite: a.composite,
+        };
+      } catch {
+        return null;
+      }
+    }).filter(Boolean);
+  }
+
+  return {
+    generatedAt: new Date().toISOString(),
+    symbol: etf.symbol,
+    name: etf.name || own.name,
+    category: etf.category,
+    benchmark: etf.benchmark,
+    source: own.source === 'live' && bench.source === 'live' ? 'live' : 'demo',
+    quote: own.quote,
+    history: {
+      dates: pts.slice(from).map((x) => x.date),
+      price: raw.slice(from).map(r2),
+      sma50: sma50.slice(from).map(r2),
+      sma200: sma200.slice(from).map(r2),
+    },
+    trailing: trailingReturns(dates, left, right),
+    calendarYears: calendarYears(dates, left, right),
+    monthly: monthlyReturns(pts),
+    rollingExcess: rollingExcess(dates, left, right),
+    scorecards,
   };
 }

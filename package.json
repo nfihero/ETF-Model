@@ -9,7 +9,8 @@
   "scripts": {
     "start": "node server.js",
     "demo": "DATA_SOURCE=demo node server.js",
-    "test": "node --test test/*.test.js"
+    "test": "node --test test/*.test.js",
+    "build": "node scripts/build-site.js"
   },
   "license": "MIT"
 }
